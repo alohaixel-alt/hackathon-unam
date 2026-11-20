@@ -178,3 +178,17 @@ export function Asistente() {
     </section>
   )
 }
+
+// ── Movimiento reducido ──────────────────────────────────────────────────────
+// Respeta la preferencia del sistema "Reducir movimiento".
+export function useAnimar() {
+  const consulta = '(prefers-reduced-motion: reduce)'
+  const [reducir, setReducir] = useState(() => typeof window !== 'undefined' && window.matchMedia(consulta).matches)
+  useEffect(() => {
+    const m = window.matchMedia(consulta)
+    const cambio = () => setReducir(m.matches)
+    m.addEventListener('change', cambio)
+    return () => m.removeEventListener('change', cambio)
+  }, [])
+  return !reducir
+}

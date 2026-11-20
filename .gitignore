@@ -1,0 +1,25 @@
+.venv/
+.hackathon/.tools/
+.hackathon/.cache/
+.hackathon/.bootstrap/
+.hackathon/setup.log
+node_modules/
+dist/
+__pycache__/
+
+# Llaves y credenciales: nunca al repositorio
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.aws/
+
+# Archivos de seguimiento (pesados, ~8 MB c/u): se bajan aparte
+data/tracking/
+
+# Basura de macOS y página web guardada
+.DS_Store
+data/*.html
+data/*_files/
+setup-log.txt

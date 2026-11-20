@@ -171,6 +171,7 @@ export default function Explorar() {
 
   return (
     <div className="flex flex-col gap-6">
+      <PlanCoach />
       <Cabina />
       <Asistente />
       <p className="text-base text-slate-800 bg-white border-l-4 border-[#B84A00] rounded-r-xl px-4 py-3">
@@ -466,6 +467,177 @@ function TarjetaEfectividad() {
         columnas={['Cobertura', 'Jugadas', 'Conversiones permitidas', 'Margen de error']}
         filas={e.coberturas.map((f) => [f.grupo, f.jugadas.toLocaleString(), pct(f.conversion), f.conversion === null ? '—' : `± ${r1(margen(f.conversion, f.jugadas))} puntos`])}
       />
+    </Tarjeta>
+  )
+}
+
+
+// ── Plan de juego para el coach ──────────────────────────────────────────────
+
+interface FilaPlan { grupo: string; jugadas: number; exito: number | null }
+interface Plan {
+  jugadas: number; exito: number | null; presion: FilaPlan[]
+  ataque: { formacion: FilaPlan[]; playAction: FilaPlan[]; salida: FilaPlan[] }
+  defensa: { cobertura: FilaPlan[]; tipo: FilaPlan[] }
+}
+type Nivel = 'clara' | 'pista' | 'azar' | 'pocas'
+
+// Compara la mejor opción contra el resto de opciones de la misma categoría.
+// mayorEsMejor=false para la defensa (menos éxito del ataque es mejor).
+function mejorOpcion(filas: FilaPlan[], mayorEsMejor: boolean) {
+  const validas = filas.filter((f) => f.exito !== null)
+  if (validas.length < 2) return { nivel: 'pocas' as Nivel, mejor: validas[0], resto: null as number | null, m: null as number | null }
+  const mejor = validas[0]
+  const otros = validas.slice(1)
+  const n2 = otros.reduce((a, f) => a + f.jugadas, 0)
+  const resto = r1(otros.reduce((a, f) => a + (f.exito as number) * f.jugadas, 0) / n2)
+  const dif = Math.abs((mejor.exito as number) - resto)
+  const m = r1(Math.sqrt(margen(mejor.exito as number, mejor.jugadas) ** 2 + margen(resto, n2) ** 2))
+  const nivel: Nivel = dif > m * 1.5 ? 'clara' : dif > m ? 'pista' : 'azar'
+  void mayorEsMejor
+  return { nivel, mejor, resto, m }
+}
+
+const ETIQUETA_NIVEL: Record<Nivel, { texto: string; clase: string }> = {
+  clara: { texto: '✔ Diferencia clara', clase: 'bg-[#013369] text-white' },
+  pista: { texto: '◐ Es una pista', clase: 'bg-orange-100 text-slate-900 border border-[#B84A00]' },
+  azar: { texto: '○ Ninguna destaca', clase: 'bg-slate-100 text-slate-900 border border-slate-400' },
+  pocas: { texto: '— Pocas jugadas', clase: 'bg-slate-100 text-slate-900 border border-slate-400' },
+}
+
+function frase(cat: string, r: ReturnType<typeof mejorOpcion>, defensa: boolean) {
+  const que = defensa ? 'de éxito del ataque' : 'de éxito'
+  if (r.nivel === 'pocas' || !r.mejor) return `${cat}: no hay suficientes opciones con datos para comparar.`
+  const base = `${cat}: ${r.mejor.grupo} (${r.mejor.exito}% ${que}, contra ${r.resto}% del resto, en ${r.mejor.jugadas} jugadas).`
+  if (r.nivel === 'clara') return `${base} Es una diferencia clara.`
+  if (r.nivel === 'pista') return `${base} Es una pista: supera apenas el margen de error de ${r.m} puntos.`
+  return `${cat}: ninguna opción destaca. ${r.mejor.grupo} fue la mejor (${r.mejor.exito}%), pero la diferencia con el resto cabe en el margen de error.`
+}
+
+function Selector<T extends string>({ etiqueta, opciones, valor, onCambio }: { etiqueta: string; opciones: [T, string][]; valor: T; onCambio: (v: T) => void }) {
+  return (
+    <div>
+      <p className="text-sm font-bold text-slate-900 mb-1" id={`sel-${etiqueta}`}>{etiqueta}</p>
+      <div role="group" aria-labelledby={`sel-${etiqueta}`} className="flex flex-wrap gap-2">
+        {opciones.map(([v, l]) => (
+          <button
+            key={v}
+            onClick={() => onCambio(v)}
+            aria-pressed={valor === v}
+            className={`px-3 py-2 rounded-lg font-semibold border-2 focus:outline-none focus-visible:ring-4 focus-visible:ring-orange-400 ${
+              valor === v ? 'bg-[#013369] text-white border-[#013369]' : 'bg-white text-slate-900 border-slate-400 hover:border-[#013369]'
+            }`}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function PlanCoach() {
+  const [down, setDown] = useState<'todos' | '1' | '2' | '3' | '4'>('3')
+  const [dist, setDist] = useState<'todas' | 'corta' | 'media' | 'larga'>('todas')
+  const [cuarto, setCuarto] = useState<'todos' | '1' | '2' | '3' | '4'>('todos')
+  const [plan, setPlan] = useState<Plan | null>(null)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    setError(false)
+    fetch(`api/plan?down=${down}&distancia=${dist}&cuarto=${cuarto}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then(setPlan)
+      .catch(() => setError(true))
+  }, [down, dist, cuarto])
+
+  const escenario = `${down === 'todos' ? 'cualquier down' : `${down}º down`}, ${dist === 'todas' ? 'cualquier distancia' : `distancia ${dist}`}, ${cuarto === 'todos' ? 'todo el partido' : `${cuarto}º cuarto`}`
+
+  let significado: string[] = ['Elige un escenario para ver qué funcionó mejor.']
+  let ataque: { cat: string; r: ReturnType<typeof mejorOpcion> }[] = []
+  let defensa: { cat: string; r: ReturnType<typeof mejorOpcion> }[] = []
+  if (plan && plan.jugadas > 0) {
+    ataque = [
+      { cat: 'Formación', r: mejorOpcion(plan.ataque.formacion, true) },
+      { cat: 'Play action', r: mejorOpcion(plan.ataque.playAction, true) },
+      { cat: 'Salida del quarterback', r: mejorOpcion(plan.ataque.salida, true) },
+    ]
+    defensa = [
+      { cat: 'Cobertura', r: mejorOpcion(plan.defensa.cobertura, false) },
+      { cat: 'Hombre a hombre o zona', r: mejorOpcion(plan.defensa.tipo, false) },
+    ]
+    const [sp, cp] = plan.presion
+    significado = [
+      `Escenario: ${escenario}. Hay ${plan.jugadas.toLocaleString()} jugadas de pase; el ataque tuvo éxito en ${plan.exito}%.`,
+      `Lo que más pesa es la presión: sin presión el ataque tuvo éxito ${sp.exito}% de las veces y con presión ${cp.exito}%. Para la defensa, presionar es la prioridad; para el ataque, protegerse.`,
+      `Si atacas. ${ataque.map((a) => frase(a.cat, a.r, false)).join(' ')}`,
+      `Si defiendes. ${defensa.map((a) => frase(a.cat, a.r, true)).join(' ')}`,
+    ]
+    if (plan.jugadas < 150) significado.push('Este escenario tiene pocas jugadas: toma estos resultados con cautela.')
+  }
+
+  const Bloque = ({ titulo, items, def }: { titulo: string; items: typeof ataque; def: boolean }) => (
+    <div className="rounded-xl border-2 border-slate-300 p-4">
+      <h3 className="text-lg font-bold text-slate-900 mb-3">{titulo}</h3>
+      <ul className="space-y-3">
+        {items.map(({ cat, r }) => (
+          <li key={cat}>
+            <p className="text-sm font-semibold text-slate-700">{cat}</p>
+            <p className="text-base font-bold text-slate-900">
+              {r.mejor ? r.mejor.grupo : 'Sin datos suficientes'}
+              {r.mejor && <span className="font-normal"> · {r.mejor.exito}% {def ? 'de éxito del ataque' : 'de éxito'}</span>}
+            </p>
+            <span className={`inline-block mt-1 px-2 py-0.5 rounded-md text-sm font-semibold ${ETIQUETA_NIVEL[r.nivel].clase}`}>{ETIQUETA_NIVEL[r.nivel].texto}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+
+  return (
+    <Tarjeta
+      titulo="Plan de juego para el coach"
+      subtitulo="Elige la situación y mira qué funcionó mejor en ataque y en defensa durante la temporada 2021 (semanas 1 a 8)."
+      significado={significado}
+    >
+      <div className="flex flex-col gap-4 mb-5">
+        <Selector etiqueta="Down" valor={down} onCambio={setDown} opciones={[['todos', 'Todos'], ['1', '1º'], ['2', '2º'], ['3', '3º'], ['4', '4º']]} />
+        <Selector etiqueta="Yardas por ganar" valor={dist} onCambio={setDist} opciones={[['todas', 'Todas'], ['corta', 'Corta (1–3)'], ['media', 'Media (4–6)'], ['larga', 'Larga (7 o más)']]} />
+        <Selector etiqueta="Cuarto" valor={cuarto} onCambio={setCuarto} opciones={[['todos', 'Todo el partido'], ['1', '1º'], ['2', '2º'], ['3', '3º'], ['4', '4º']]} />
+      </div>
+
+      {error && <p role="alert" className="text-red-900">No se pudo calcular el plan. Intenta de nuevo.</p>}
+      {plan && plan.jugadas === 0 && <p role="status" className="text-slate-900">No hay jugadas en esta combinación.</p>}
+      {plan && plan.jugadas > 0 && (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4" aria-live="polite">
+            <Bloque titulo="🏈 Si atacas" items={ataque} def={false} />
+            <Bloque titulo="🛡️ Si defiendes" items={defensa} def={true} />
+          </div>
+          <p className="text-sm text-slate-800 mt-3">
+            <strong>Jugada exitosa:</strong> en 1er down ganar al menos 40% de las yardas que faltan; en 2do, 60%; en 3ro y 4to, todas.
+            Solo se comparan opciones con 30 jugadas o más (15 en play action y salida del quarterback).
+          </p>
+          <details className="mt-3">
+            <summary className="cursor-pointer font-semibold text-[#013369] focus:outline-none focus-visible:ring-4 focus-visible:ring-orange-400 rounded">Ver todas las opciones en tablas</summary>
+            {[
+              ['Ataque: formación', plan.ataque.formacion, 'Éxito del ataque'],
+              ['Ataque: play action', plan.ataque.playAction, 'Éxito del ataque'],
+              ['Ataque: salida del quarterback', plan.ataque.salida, 'Éxito del ataque'],
+              ['Defensa: cobertura (menos es mejor)', plan.defensa.cobertura, 'Éxito permitido'],
+              ['Defensa: hombre a hombre o zona (menos es mejor)', plan.defensa.tipo, 'Éxito permitido'],
+              ['Presión', plan.presion, 'Éxito del ataque'],
+            ].map(([t, f, c]) => (
+              <Tabla
+                key={t as string}
+                titulo={t as string}
+                columnas={['Opción', 'Jugadas', c as string, 'Margen de error']}
+                filas={(f as FilaPlan[]).map((x) => [x.grupo, x.jugadas.toLocaleString(), pct(x.exito), x.exito === null ? '—' : `± ${r1(margen(x.exito, x.jugadas))} puntos`])}
+              />
+            ))}
+          </details>
+        </>
+      )}
     </Tarjeta>
   )
 }

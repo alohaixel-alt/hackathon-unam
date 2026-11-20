@@ -427,6 +427,70 @@ def _calcular_efectividad() -> dict:
     return {"escenarios": escenarios}
 
 
+# ── Plan de juego para el coach (cualquier down, distancia y cuarto) ──────────
+
+_base_plan: pd.DataFrame | None = None
+FORMACIONES = {"SHOTGUN": "Shotgun", "EMPTY": "Empty (sin corredor)", "SINGLEBACK": "Singleback",
+               "I_FORM": "Formación I", "PISTOL": "Pistol", "JUMBO": "Jumbo"}
+TIPO_COBERTURA = {"Man": "Hombre a hombre", "Zone": "Zona"}
+
+
+def _df_plan() -> pd.DataFrame:
+    global _base_plan
+    if _base_plan is None:
+        plays = pd.read_csv(DATA / "plays.csv")
+        pff = pd.read_csv(DATA / "pffScoutingData.csv")
+        pres = pff.groupby(["gameId", "playId"])[["pff_hit", "pff_hurry", "pff_sack"]].sum().sum(axis=1).gt(0)
+        d = plays.merge(pres.rename("presion").reset_index(), on=["gameId", "playId"], how="left")
+        d["presion"] = d["presion"].fillna(False).astype(bool)
+        d = d[d["down"].between(1, 4) & d["quarter"].between(1, 4)].copy()
+        # Jugada exitosa (definición estándar): 40% de las yardas en 1er down, 60% en 2do, todas en 3ro y 4to.
+        meta = d["down"].map({1: 0.4, 2: 0.6, 3: 1.0, 4: 1.0}) * d["yardsToGo"]
+        d["exito"] = d["playResult"] >= meta
+        d["distancia"] = pd.cut(d["yardsToGo"], [0, 3, 6, 99], labels=["corta", "media", "larga"]).astype(object)
+        d["formacion"] = d["offenseFormation"].map(FORMACIONES)
+        d["playAction"] = d["pff_playAction"].map({0: "Sin play action", 1: "Con play action"})
+        d["salida"] = d["dropBackType"].map({"TRADITIONAL": "Desde la bolsa (pocket)",
+                                             "DESIGNED_ROLLOUT_RIGHT": "Rollout diseñado",
+                                             "DESIGNED_ROLLOUT_LEFT": "Rollout diseñado"})
+        d["cobertura"] = d["pff_passCoverage"].where(~d["pff_passCoverage"].isin(COBERTURAS_SITUACIONALES))
+        d["tipoCobertura"] = d["pff_passCoverageType"].map(TIPO_COBERTURA)
+        _base_plan = d
+    return _base_plan
+
+
+@app.get("/api/plan")
+def plan(
+    down: str = Query(default="3", pattern="^(todos|[1-4])$"),
+    distancia: str = Query(default="todas", pattern="^(todas|corta|media|larga)$"),
+    cuarto: str = Query(default="todos", pattern="^(todos|[1-4])$"),
+):
+    d = _df_plan()
+    if down != "todos":
+        d = d[d["down"] == int(down)]
+    if distancia != "todas":
+        d = d[d["distancia"] == distancia]
+    if cuarto != "todos":
+        d = d[d["quarter"] == int(cuarto)]
+
+    def filas(col: str, minimo: int = 30) -> list[dict]:
+        out = [{"grupo": str(k), "jugadas": int(len(g)), "exito": round(float(g["exito"].mean() * 100), 1)}
+               for k, g in d.dropna(subset=[col]).groupby(col) if len(g) >= minimo]
+        return sorted(out, key=lambda x: -x["exito"])
+
+    def fila(df: pd.DataFrame, nombre: str) -> dict:
+        return {"grupo": nombre, "jugadas": int(len(df)), "exito": round(float(df["exito"].mean() * 100), 1) if len(df) else None}
+
+    return {
+        "jugadas": int(len(d)),
+        "exito": round(float(d["exito"].mean() * 100), 1) if len(d) else None,
+        "presion": [fila(d[~d["presion"]], "Sin presión"), fila(d[d["presion"]], "Con presión")],
+        "ataque": {"formacion": filas("formacion"), "playAction": filas("playAction", 15), "salida": filas("salida", 15)},
+        "defensa": {"cobertura": sorted(filas("cobertura"), key=lambda x: x["exito"]),
+                    "tipo": sorted(filas("tipoCobertura"), key=lambda x: x["exito"])},
+    }
+
+
 def _conclusiones_tercer_down() -> list[str]:
     """Frases ya calculadas para que la IA no tenga que interpretar tablas."""
     frases = ["En 3er down, 'convertir' es que el ataque ganó las yardas para el primer down. "

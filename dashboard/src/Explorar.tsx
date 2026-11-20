@@ -204,6 +204,7 @@ export default function Explorar() {
     <div className="flex flex-col gap-6">
       <ResumenClave datos={datos} />
       <PlanCoach />
+      <TopJugadores />
       <ReproductorJugada />
       <Cabina />
       <Asistente />
@@ -830,6 +831,77 @@ function ReproductorJugada() {
       {!permiteMovimiento && (
         <p className="mt-3 text-sm text-slate-800">Tu dispositivo pide reducir el movimiento. Usa la barra para avanzar paso a paso.</p>
       )}
+    </Tarjeta>
+  )
+}
+
+// ── Top 5 de jugadores que presionan ─────────────────────────────────────────
+
+interface JugadorTop {
+  puesto: number
+  nombre: string
+  posicion: string
+  equipo: string
+  partidos: number
+  intentos: number
+  presiones: number
+  tasa: number
+  sacks: number
+  hits: number
+  hurries: number
+  margen: number | null
+}
+
+function TopJugadores() {
+  const animar = useAnimar()
+  const esc = useEscala()
+  const tk = Math.round(14 * esc)
+  const [jugadores, setJugadores] = useState<JugadorTop[] | null>(null)
+
+  useEffect(() => {
+    fetch('api/jugadores')
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((j) => setJugadores(j.jugadores))
+      .catch(() => setJugadores([]))
+  }, [])
+
+  if (!jugadores) return <p role="status" className="text-slate-700">Calculando los jugadores destacados…</p>
+  if (!jugadores.length) return null
+
+  const primero = jugadores[0]
+  const explicacion = [
+    'Este ranking cuenta cuántas veces cada defensor apuró, golpeó o derribó al quarterback.',
+    `Solo incluimos jugadores con 100 intentos o más. ${primero.nombre} aparece primero: logró presión en ${primero.tasa}% de sus ${primero.intentos} intentos.`,
+    'Este resultado solo mide presión al quarterback durante las semanas 1 a 8. No dice quién es el mejor jugador en general.',
+  ]
+
+  return (
+    <Tarjeta
+      titulo="Cinco defensores destacados"
+      subtitulo="Jugadores con el porcentaje más alto de presión al quarterback. Temporada 2021, semanas 1 a 8."
+      significado={explicacion}
+    >
+      <div role="img" aria-label={`Gráfica del top cinco. ${jugadores.map((j) => `${j.puesto}: ${j.nombre}, ${j.tasa}%`).join('. ')}.`}>
+        <ResponsiveContainer width="100%" height={Math.round(320 * esc)}>
+          <BarChart layout="vertical" data={jugadores} margin={{ top: 8, right: 70, left: 8, bottom: 4 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#CBD5E1" />
+            <XAxis type="number" unit="%" domain={[0, 30]} tick={{ fontSize: tk, fill: '#0F172A' }} />
+            <YAxis type="category" dataKey="nombre" width={Math.round(140 * esc)} tick={{ fontSize: tk, fill: '#0F172A' }} />
+            <Bar isAnimationActive={animar} dataKey="tasa" name="Tasa de presión" radius={[0, 6, 6, 0]}>
+              {jugadores.map((j) => <Cell key={j.nombre} fill={j.puesto === 1 ? NARANJA : AZUL} />)}
+              <LabelList dataKey="tasa" position="right" formatter={(v: unknown) => `${v}%`} style={{ fill: '#0F172A', fontWeight: 700, fontSize: tk }} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <Tabla
+        titulo="Datos de cada jugador"
+        columnas={['Puesto', 'Jugador', 'Equipo', 'Intentos', 'Presiones', 'Tasa', 'Sacks', 'Hits', 'Hurries', 'Duda estimada']}
+        filas={jugadores.map((j) => [
+          j.puesto, `${j.nombre} (${j.posicion})`, j.equipo, j.intentos, j.presiones, `${j.tasa}%`,
+          j.sacks, j.hits, j.hurries, j.margen === null ? '—' : `± ${j.margen} puntos`,
+        ])}
+      />
     </Tarjeta>
   )
 }

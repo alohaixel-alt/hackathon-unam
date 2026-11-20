@@ -68,6 +68,17 @@ def test_velocidad_documenta_muestra_e_incertidumbre():
     assert all(fila["margenRush"] is not None for fila in datos["porClima"])
 
 
+def test_top_cinco_jugadores_usa_minimo_de_intentos():
+    respuesta = client.get("/api/jugadores")
+    assert respuesta.status_code == 200
+    datos = respuesta.json()
+    assert datos["minimoIntentos"] == 100
+    assert len(datos["jugadores"]) == 5
+    assert datos["jugadores"][0]["nombre"] == "Myles Garrett"
+    assert datos["jugadores"][0]["tasa"] == 24.0
+    assert all(j["intentos"] >= 100 for j in datos["jugadores"])
+
+
 def test_reproduccion_es_una_jugada_real_y_completa():
     respuesta = client.get("/api/replay")
     assert respuesta.status_code == 200

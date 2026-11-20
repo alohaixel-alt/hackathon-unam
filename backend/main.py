@@ -759,6 +759,7 @@ def preguntar(p: Pregunta, request: Request):
     except HTTPException:
         pass
     contexto["conclusionesTercerDown"] = _conclusiones_tercer_down()
+    contexto["topCincoJugadoresPorTasaDePresion"] = jugadores()
     try:
         import boto3
 
@@ -908,6 +909,69 @@ def comparar(
             for c in coberturas
         ],
     }
+
+# ── Top 5 de presión por jugador ─────────────────────────────────────────────
+
+_cache_jugadores: dict | None = None
+
+
+@app.get("/api/jugadores")
+def jugadores():
+    global _cache_jugadores
+    if _cache_jugadores is not None:
+        return _cache_jugadores
+
+    pff = pd.read_csv(DATA / "pffScoutingData.csv")
+    nombres = pd.read_csv(DATA / "players.csv", usecols=["nflId", "displayName", "officialPosition"])
+    plays = pd.read_csv(DATA / "plays.csv", usecols=["gameId", "playId", "defensiveTeam"])
+    rush = pff[pff["pff_role"] == "Pass Rush"].copy()
+    rush["presion"] = rush[["pff_hit", "pff_hurry", "pff_sack"]].fillna(0).max(axis=1) > 0
+    rush = rush.merge(plays, on=["gameId", "playId"], how="left")
+
+    filas = []
+    for nfl_id, grupo in rush.groupby("nflId"):
+        if len(grupo) < 100:
+            continue
+        por_partido = grupo.groupby("gameId")["presion"].mean()
+        margen = 1.96 * por_partido.std() / np.sqrt(len(por_partido)) * 100 if len(por_partido) > 1 else None
+        filas.append({
+            "nflId": int(nfl_id),
+            "equipo": "/".join(sorted(grupo["defensiveTeam"].dropna().unique())),
+            "partidos": int(grupo["gameId"].nunique()),
+            "intentos": int(len(grupo)),
+            "presiones": int(grupo["presion"].sum()),
+            "tasa": round(float(grupo["presion"].mean() * 100), 1),
+            "sacks": int(grupo["pff_sack"].fillna(0).sum()),
+            "hits": int(grupo["pff_hit"].fillna(0).sum()),
+            "hurries": int(grupo["pff_hurry"].fillna(0).sum()),
+            "margen": round(float(margen), 1) if margen is not None and pd.notna(margen) else None,
+        })
+
+    tabla = pd.DataFrame(filas).merge(nombres, on="nflId", how="left")
+    tabla = tabla.sort_values(["tasa", "presiones"], ascending=False).head(5)
+    top = []
+    for puesto, (_, r) in enumerate(tabla.iterrows(), 1):
+        top.append({
+            "puesto": puesto,
+            "nombre": r["displayName"],
+            "posicion": r["officialPosition"],
+            "equipo": r["equipo"],
+            "partidos": int(r["partidos"]),
+            "intentos": int(r["intentos"]),
+            "presiones": int(r["presiones"]),
+            "tasa": float(r["tasa"]),
+            "sacks": int(r["sacks"]),
+            "hits": int(r["hits"]),
+            "hurries": int(r["hurries"]),
+            "margen": float(r["margen"]) if pd.notna(r["margen"]) else None,
+        })
+    _cache_jugadores = {
+        "minimoIntentos": 100,
+        "definicion": "Presión = hurry, hit o sack. La tasa divide las jugadas con presión entre los intentos de llegar al quarterback.",
+        "jugadores": top,
+    }
+    return _cache_jugadores
+
 
 # ── Frontend: siempre al final para no interceptar la API ────────────────────
 

@@ -63,7 +63,16 @@ export function BotonEscuchar({ obtenerTexto, etiqueta = 'Escuchar' }: { obtener
       setHablando(false)
       return
     }
-    const texto = obtenerTexto().replace(/\s+/g, ' ').trim()
+    const texto = obtenerTexto()
+      .replace(/\s+/g, ' ')
+      .replace(/1er/g, 'primer')
+      .replace(/2do/g, 'segundo')
+      .replace(/3er/g, 'tercer')
+      .replace(/4to/g, 'cuarto')
+      .replace(/%/g, ' por ciento')
+      .replace(/°F/g, ' grados Fahrenheit')
+      .replace(/yds\/s/g, ' yardas por segundo')
+      .trim()
     if (!texto) return
     window.speechSynthesis.cancel()
     const voz = new SpeechSynthesisUtterance(texto)
@@ -92,9 +101,9 @@ export function BotonEscuchar({ obtenerTexto, etiqueta = 'Escuchar' }: { obtener
 // ── Asistente con IA ─────────────────────────────────────────────────────────
 
 const SUGERENCIAS = [
-  '¿Qué pasa con la presión en el 3er down?',
-  '¿Cambia la presión a lo largo del partido?',
-  '¿Qué se ve del clima en el 3er cuarto?',
+  '¿Qué ocurrió en el 3er down?',
+  '¿Qué se observó durante el partido?',
+  '¿Qué sabemos y qué no sabemos del clima?',
 ]
 
 export function Asistente() {
@@ -107,18 +116,28 @@ export function Asistente() {
     if (q.length < 3 || cargando) return
     setCargando(true)
     setRespuesta(null)
+    const control = new AbortController()
+    const limite = window.setTimeout(() => control.abort(), 25000)
     try {
       const r = await fetch('api/preguntar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pregunta: q }),
+        signal: control.signal,
       })
-      if (!r.ok) throw new Error()
+      if (!r.ok) {
+        const problema = await r.json().catch(() => ({}))
+        throw new Error(problema.detail ?? 'No se pudo obtener una respuesta.')
+      }
       const j = await r.json()
       setRespuesta({ texto: j.respuesta, ia: j.ia })
-    } catch {
-      setRespuesta({ texto: 'No se pudo contactar al asistente. Revisa las tablas de esta página.', ia: false })
+    } catch (e) {
+      const texto = e instanceof Error && e.name === 'AbortError'
+        ? 'La respuesta tardó demasiado. Puedes intentarlo otra vez.'
+        : e instanceof Error ? e.message : 'No se pudo contactar al asistente.'
+      setRespuesta({ texto, ia: false })
     } finally {
+      window.clearTimeout(limite)
       setCargando(false)
     }
   }
@@ -126,7 +145,7 @@ export function Asistente() {
   return (
     <section aria-labelledby="titulo-asistente" className="bg-white rounded-2xl border border-slate-300 shadow-sm p-6">
       <h2 id="titulo-asistente" className="text-lg font-bold text-slate-900">Pregúntale al asistente</h2>
-      <p className="text-sm text-slate-700 mb-4">Responde solo con los datos de esta página.</p>
+      <p className="text-sm text-slate-700 mb-4">Escribe una pregunta. La IA responderá solo con los datos de esta página. Puede equivocarse: revisa también las explicaciones y las tablas.</p>
 
       <form
         onSubmit={(e) => { e.preventDefault(); enviar(pregunta) }}

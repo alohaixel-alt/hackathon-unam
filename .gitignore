@@ -23,3 +23,7 @@ data/tracking/
 data/*.html
 data/*_files/
 setup-log.txt
+
+# Reportes locales generados
+.hackathon/ENTREGA.md
+.hackathon/semantic-review/

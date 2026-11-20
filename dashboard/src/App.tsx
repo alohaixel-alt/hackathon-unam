@@ -631,8 +631,8 @@ export default function App() {
       <header className="bg-[#013369] text-white px-6 py-4 border-b-4 border-[#B84A00]">
         <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-xl font-bold">Presión, clima y desgaste en la NFL</h1>
-            <p className="text-sm text-blue-100">¿Cambia la presión sobre el quarterback con el clima y a lo largo del partido?</p>
+            <h1 className="text-xl font-bold">Presión y clima en jugadas de pase de la NFL</h1>
+            <p className="text-sm text-blue-100">Explora qué ocurrió según el down, la distancia, el cuarto y el clima.</p>
           </div>
           <ControlesTamano />
         </div>

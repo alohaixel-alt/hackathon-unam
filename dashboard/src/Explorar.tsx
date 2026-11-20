@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { Asistente, BotonEscuchar, useAnimar, useEscala } from './Accesibilidad'
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, XAxis, YAxis } from 'recharts'
 
@@ -9,12 +9,12 @@ const NARANJA = '#B84A00'
 
 interface FilaDown { down: number; jugadas: number; presion: number; yardas: number }
 interface FilaCuarto { cuarto: number; jugadas: number; presion: number; yardas: number }
-interface FilaClima { clima: string; jugadas: number; presion: number | null; yardas: number | null }
+interface FilaClima { clima: string; partidos: number; jugadas: number; presion: number | null; margen: number | null; yardas: number | null }
 interface FilaMatriz { clima: string; q1: number | null; q2: number | null; q3: number | null; q4: number | null }
 interface Datos {
   archivos: { nombre: string; filas: number; que: string }[]
   temporada: number[]
-  partidos: { total: number; conTemperatura: number; domo: number; tempMin: number; tempMax: number }
+  partidos: { total: number; conTemperatura: number; interior: number; sinTemperatura: number; tempMin: number; tempMax: number }
   presionGlobal: number
   porDown: FilaDown[]
   porCuarto: FilaCuarto[]
@@ -46,8 +46,6 @@ function Tarjeta({ titulo, subtitulo, significado, children }: { titulo: string;
   )
 }
 
-// Margen de error al 95% para un porcentaje (en puntos porcentuales).
-const margen = (pctV: number, n: number) => 1.96 * Math.sqrt((pctV / 100) * (1 - pctV / 100) / n) * 100
 const r1 = (x: number) => Math.round(x * 10) / 10
 
 function Tabla({ titulo, columnas, filas }: { titulo: string; columnas: string[]; filas: (string | number)[][] }) {
@@ -133,40 +131,39 @@ export default function Explorar() {
     return <p role="status" className="text-slate-700 py-10 text-center">Cargando datos…</p>
   }
 
-  const tempMasAlta = datos.clima3erCuarto
-    .filter((c) => c.presion !== null)
-    .reduce((a, b) => ((a.presion ?? 0) >= (b.presion ?? 0) ? a : b))
-
   const dn = Object.fromEntries(datos.porDown.map((d) => [d.down, d.presion]))
   const qn = Object.fromEntries(datos.porCuarto.map((d) => [d.cuarto, d.presion]))
-  const c3 = datos.clima3erCuarto.filter((c) => c.presion !== null) as (FilaClima & { presion: number })[]
+  const c3 = datos.clima3erCuarto.filter(
+    (c) => c.presion !== null && c.clima !== 'Temperatura no disponible'
+  ) as (FilaClima & { presion: number; margen: number })[]
   const alto = c3.reduce((a, b) => (a.presion >= b.presion ? a : b))
   const bajo = c3.reduce((a, b) => (a.presion <= b.presion ? a : b))
   const dif = r1(alto.presion - bajo.presion)
-  const mDif = r1(Math.sqrt(margen(alto.presion, alto.jugadas) ** 2 + margen(bajo.presion, bajo.jugadas) ** 2))
+  const mDif = r1(Math.sqrt(alto.margen ** 2 + bajo.margen ** 2))
   const fríos = datos.temperaturas.filter((t) => t.rango === '≤50').reduce((a, t) => a + t.partidos, 0)
 
   const sigDown = [
-    'Cada barra es un down. Mientras más alta, más veces presionaron al quarterback.',
-    `La presión sube de ${dn[1]}% en el 1er down a ${dn[3]}% en el 3er down, y llega a ${dn[4]}% en el 4to.`,
-    'Es la diferencia más clara de la app y sale de miles de jugadas, así que es confiable. Las barras naranjas marcan el 3er y el 4to down.',
+    'Cada barra muestra un down. Un down es un intento del ataque para avanzar.',
+    `En estos datos hubo presión en ${dn[1]}% de los pases de 1er down y en ${dn[3]}% de los pases de 3er down.`,
+    'Esta diferencia aparece en miles de jugadas. La gráfica muestra lo que ocurrió, pero no explica por qué ocurrió.',
   ]
   const sigCuarto = [
-    'Cada barra es un cuarto del partido. Mientras más alta, más presión hubo en ese cuarto.',
-    `La presión sube poco a poco: ${qn[1]}% en el 1er cuarto, ${qn[2]}% en el 2do, ${qn[3]}% en el 3ro y ${qn[4]}% en el 4to.`,
-    `Del 1er al 4to cuarto la diferencia es de ${r1(qn[4] - qn[1])} puntos: es pequeña y gradual. Habla de un desgaste que se acumula, no de un salto en un solo cuarto.`,
+    'Cada barra muestra una parte del partido. Una barra más alta significa que hubo presión más veces.',
+    `La presión fue ${qn[1]}% en el 1er cuarto, ${qn[2]}% en el 2do, ${qn[3]}% en el 3ro y ${qn[4]}% en el 4to.`,
+    `Del 1er al 4to cuarto la diferencia fue de ${r1(qn[4] - qn[1])} puntos. Es pequeña. No sabemos si se debe al cansancio, al marcador o a las jugadas elegidas.`,
   ]
   const sigClima = [
-    'Cada barra es un tipo de clima, contando solo las jugadas del 3er cuarto. Mientras más larga, más presión.',
-    `La barra más larga es ${alto.clima} con ${alto.presion}%, y la más corta es ${bajo.clima} con ${bajo.presion}%. La diferencia es de ${dif} puntos.`,
+    'Cada barra muestra un tipo de clima. Solo contamos jugadas del 3er cuarto.',
+    `La presión fue mayor con ${alto.clima}: ${alto.presion}%. Fue menor con ${bajo.clima}: ${bajo.presion}%. La diferencia fue de ${dif} puntos.`,
     dif > mDif
-      ? `El margen de error de esa diferencia es de más o menos ${mDif} puntos. La diferencia apenas lo supera, así que es una pista que vale la pena seguir, no una prueba.`
-      : `El margen de error de esa diferencia es de más o menos ${mDif} puntos, mayor que la diferencia. Podría ser solo azar.`,
+      ? `La duda estimada es de más o menos ${mDif} puntos. La diferencia apenas la supera. Es una pista, no una conclusión.`
+      : `La duda estimada es de más o menos ${mDif} puntos. Es mayor que la diferencia. El resultado puede deberse al azar.`,
+    'Los partidos sin temperatura aparecen en un grupo separado. No los usamos para comparar el clima.',
   ]
   const sigTemp = [
-    'Cada barra cuenta cuántos partidos al aire libre se jugaron en ese rango de temperatura, en grados Fahrenheit.',
-    `La mayoría se jugó entre 61 y 80 °F. Solo ${fríos} partidos fueron a 50 °F o menos, y ${datos.partidos.domo} fueron en domo o con techo cerrado.`,
-    'Por eso este análisis casi no puede decir nada del frío extremo: hay muy pocos partidos así.',
+    'Cada barra cuenta partidos al aire libre. La temperatura está en grados Fahrenheit.',
+    `Solo ${fríos} partidos fueron a 50 °F o menos. Hubo ${datos.partidos.interior} partidos en interior. En ${datos.partidos.sinTemperatura} partidos no conocemos la temperatura.`,
+    'Hay pocos partidos con frío fuerte. Por eso no podemos sacar una conclusión firme sobre el frío extremo.',
   ]
 
   return (
@@ -175,8 +172,8 @@ export default function Explorar() {
       <Cabina />
       <Asistente />
       <p className="text-base text-slate-800 bg-white border-l-4 border-[#B84A00] rounded-r-xl px-4 py-3">
-        <strong>Qué medimos:</strong> hay <strong>presión</strong> cuando algún defensor golpea (hit), apura (hurry) o derriba (sack)
-        al quarterback. Pasó en <strong>{datos.presionGlobal}%</strong> de las {datos.porDown.reduce((a, d) => a + d.jugadas, 0).toLocaleString()} jugadas de pase
+        <strong>Qué medimos:</strong> hay <strong>presión</strong> cuando un defensor obliga al quarterback a lanzar rápido,
+        lo golpea o lo derriba antes del pase. Ocurrió en <strong>{datos.presionGlobal}%</strong> de las {datos.porDown.reduce((a, d) => a + d.jugadas, 0).toLocaleString()} jugadas de pase
         de la temporada {datos.temporada.join(', ')} (semanas 1 a 8, {datos.partidos.total} partidos).
       </p>
 
@@ -206,9 +203,9 @@ export default function Explorar() {
       </Tarjeta>
 
       <Tarjeta
-        titulo="2 · El desgaste a lo largo del partido"
+        titulo="2 · Presión durante el partido"
         significado={sigCuarto}
-        subtitulo="Porcentaje de jugadas con presión en cada cuarto"
+        subtitulo="Cuántas jugadas tuvieron presión en cada cuarto"
       >
         <div role="img" aria-label={`Gráfica de barras. ${datos.porCuarto.map((d) => `Cuarto ${d.cuarto}: ${d.presion}%`).join('. ')}.`}>
           <ResponsiveContainer width="100%" height={260}>
@@ -245,7 +242,7 @@ export default function Explorar() {
               <XAxis type="number" unit="%" domain={[0, 50]} tick={{ fontSize: tk, fill: '#0F172A' }} />
               <YAxis type="category" dataKey="clima" width={Math.round(150 * esc)} tick={{ fontSize: tk, fill: '#0F172A' }} />
               <Bar isAnimationActive={animar} dataKey="presion" name="Presión" radius={[0, 6, 6, 0]}>
-                {datos.clima3erCuarto.map((d) => <Cell key={d.clima} fill={d.clima === tempMasAlta.clima ? NARANJA : AZUL} />)}
+                {datos.clima3erCuarto.map((d) => <Cell key={d.clima} fill={d.clima === alto.clima ? NARANJA : AZUL} />)}
                 <LabelList dataKey="presion" position="right" formatter={(v: unknown) => `${v}%`} style={{ fill: '#0F172A', fontWeight: 700, fontSize: tk }} />
               </Bar>
             </BarChart>
@@ -253,8 +250,8 @@ export default function Explorar() {
         </div>
         <Tabla
           titulo="Mismos datos en tabla"
-          columnas={['Clima', 'Jugadas', 'Con presión', 'Margen de error', 'Yardas promedio']}
-          filas={datos.clima3erCuarto.map((d) => [d.clima, d.jugadas.toLocaleString(), pct(d.presion), d.presion === null ? '—' : `± ${r1(margen(d.presion, d.jugadas))} puntos`, d.yardas === null ? 'sin datos' : d.yardas.toFixed(2)])}
+          columnas={['Clima', 'Partidos', 'Jugadas', 'Con presión', 'Duda estimada', 'Yardas promedio']}
+          filas={datos.clima3erCuarto.map((d) => [d.clima, d.partidos, d.jugadas.toLocaleString(), pct(d.presion), d.margen === null ? '—' : `± ${d.margen} puntos`, d.yardas === null ? 'sin datos' : d.yardas.toFixed(2)])}
         />
         <Tabla
           titulo="Presión por clima y cuarto"
@@ -266,7 +263,7 @@ export default function Explorar() {
       <Tarjeta
         titulo="4 · Qué temperaturas hay en los datos"
         significado={sigTemp}
-        subtitulo={`Partidos al aire libre por rango de temperatura (°F). ${datos.partidos.domo} partidos fueron en domo o techo cerrado y no tienen temperatura.`}
+        subtitulo={`Partidos al aire libre por temperatura. ${datos.partidos.interior} partidos fueron en interior. En ${datos.partidos.sinTemperatura} partidos no conocemos la temperatura.`}
       >
         <div role="img" aria-label={`Gráfica de barras. ${datos.temperaturas.map((t) => `${t.rango} °F: ${t.partidos} partidos`).join('. ')}.`}>
           <ResponsiveContainer width="100%" height={240}>
@@ -296,8 +293,16 @@ export default function Explorar() {
 
 // ── Velocidad (datos de seguimiento) ─────────────────────────────────────────
 
-interface FilaVel { grupo: string | number; partidos: number; jugadas: number; qb: number; rush: number }
-interface DatosVel { partidos: number; jugadas: number; porClima: FilaVel[]; porCuarto: FilaVel[]; presion: FilaVel[] }
+interface FilaVel {
+  grupo: string | number
+  partidos: number
+  jugadas: number
+  qb: number
+  rush: number
+  margenQb: number | null
+  margenRush: number | null
+}
+interface DatosVel { partidos: number; jugadas: number; muestra: string; porClima: FilaVel[]; porCuarto: FilaVel[]; presion: FilaVel[] }
 
 function TarjetaVelocidad() {
   const animar = useAnimar()
@@ -315,21 +320,19 @@ function TarjetaVelocidad() {
 
   const min = Math.min(...v.porClima.map((c) => c.rush))
   const max = Math.max(...v.porClima.map((c) => c.rush))
-  const qMin = Math.min(...v.porCuarto.map((c) => c.rush))
-  const qMax = Math.max(...v.porCuarto.map((c) => c.rush))
-  const sin = v.presion.find((p) => p.grupo === 'Sin presión')
-  const con = v.presion.find((p) => p.grupo === 'Con presión')
+  const maxDuda = Math.max(...v.porClima.map((c) => c.margenRush ?? 0))
   const sigVel = [
-    'Cada barra es la velocidad máxima promedio de los defensores que van por el quarterback, en yardas por segundo. Mientras más larga, más rápido.',
-    `Todas las barras miden casi lo mismo: de ${min} a ${max} yardas por segundo. Entre el 1er y el 4to cuarto tampoco cambia (de ${qMin} a ${qMax}).`,
-    `Cuando hay presión, los defensores sí corren más (${con?.rush} contra ${sin?.rush} yardas por segundo), pero eso pasa en cualquier clima. En estos datos, lo que cambia la presión es la situación del juego, no la temperatura.`,
+    'Cada barra muestra la velocidad promedio de los defensores que corren hacia el quarterback.',
+    `Los promedios van de ${min} a ${max} yardas por segundo. La duda estimada llega a más o menos ${maxDuda} yardas por segundo. Los rangos se enciman.`,
+    `No encontramos una diferencia clara entre los climas. Esto no prueba que el clima nunca afecte la velocidad. Solo describe esta muestra de ${v.partidos} partidos.`,
+    v.muestra,
   ]
 
   return (
     <Tarjeta
       titulo="5 · ¿El clima cambia la velocidad?"
       significado={sigVel}
-      subtitulo={`Velocidad máxima después del snap, en yardas por segundo. Muestra de ${v.partidos} partidos y ${v.jugadas.toLocaleString()} jugadas.`}
+      subtitulo={`Velocidad en yardas por segundo. Esta parte usa una muestra de ${v.partidos} partidos y ${v.jugadas.toLocaleString()} jugadas.`}
     >
       <div role="img" aria-label={`Gráfica de barras. Velocidad de los defensores que presionan: ${v.porClima.map((c) => `${c.grupo}: ${c.rush} yardas por segundo`).join('. ')}.`}>
         <ResponsiveContainer width="100%" height={Math.round(300 * esc)}>
@@ -345,8 +348,8 @@ function TarjetaVelocidad() {
       </div>
       <Tabla
         titulo="Velocidad por clima"
-        columnas={['Clima', 'Partidos', 'Jugadas', 'Defensores que presionan', 'Quarterback']}
-        filas={v.porClima.map((c) => [String(c.grupo), c.partidos, c.jugadas.toLocaleString(), `${c.rush} yds/s`, `${c.qb} yds/s`])}
+        columnas={['Clima', 'Partidos', 'Jugadas', 'Defensores', 'Duda entre partidos', 'Quarterback']}
+        filas={v.porClima.map((c) => [String(c.grupo), c.partidos, c.jugadas.toLocaleString(), `${c.rush} yds/s`, c.margenRush === null ? '—' : `± ${c.margenRush} yds/s`, `${c.qb} yds/s`])}
       />
       <Tabla
         titulo="Velocidad por cuarto"
@@ -365,21 +368,21 @@ function TarjetaVelocidad() {
 
 // ── Qué funcionó en el 3er down ──────────────────────────────────────────────
 
-interface FilaEf { grupo: string; jugadas: number; conversion: number | null }
+interface FilaEf { grupo: string; partidos: number; jugadas: number; conversion: number | null; margen: number | null }
 interface Escenario { escenario: string; general: FilaEf; presion: FilaEf[]; playAction: FilaEf[]; coberturas: FilaEf[] }
 
 // Compara dos grupos y dice, en lenguaje sencillo, cuánto confiar en la diferencia.
 function comparar(a: FilaEf, b: FilaEf) {
-  if (a.conversion === null || b.conversion === null || a.jugadas < 15 || b.jugadas < 15) {
-    return { dif: null as number | null, m: null as number | null, texto: 'Hay muy pocas jugadas para comparar.' }
+  if (a.conversion === null || b.conversion === null || a.margen === null || b.margen === null) {
+    return { dif: null as number | null, m: null as number | null, texto: 'Faltan datos para comparar con seguridad.' }
   }
   const dif = r1(a.conversion - b.conversion)
-  const m = r1(Math.sqrt(margen(a.conversion, a.jugadas) ** 2 + margen(b.conversion, b.jugadas) ** 2))
+  const m = r1(Math.sqrt(a.margen ** 2 + b.margen ** 2))
   const texto = Math.abs(dif) > m * 1.5
-    ? 'Es una diferencia clara: supera de sobra el margen de error.'
+    ? 'La diferencia es mayor que la duda estimada en esta muestra.'
     : Math.abs(dif) > m
-      ? `Supera apenas el margen de error (más o menos ${m} puntos), así que es una pista.`
-      : `Cabe dentro del margen de error (más o menos ${m} puntos): podría ser azar.`
+      ? `La diferencia apenas supera la duda estimada de ${m} puntos. Es una pista.`
+      : `La duda estimada es de ${m} puntos. La diferencia puede ser azar.`
   return { dif, m, texto }
 }
 
@@ -400,21 +403,20 @@ function TarjetaEfectividad() {
   const e = esc_[i]
   const [sinP, conP] = e.presion
   const [sinPA, conPA] = e.playAction
-  const cP = comparar(sinP, conP)
   const cPA = comparar(conPA, sinPA)
   const mejor = e.coberturas[0]
   const peor = e.coberturas[e.coberturas.length - 1]
   const cCob = mejor && peor && mejor !== peor ? comparar(peor, mejor) : null
 
   const significado = [
-    `Escenario: 3er down, ${e.escenario.toLowerCase()}. "Convertir" quiere decir que el ataque ganó las yardas que le faltaban para el primer down. En este escenario lo logró en ${e.general.conversion}% de ${e.general.jugadas.toLocaleString()} jugadas.`,
-    `Presión: sin presión el ataque convirtió ${sinP.conversion}% de las veces; con presión, solo ${conP.conversion}%. ${cP.texto}`,
+    `Escenario: 3er down, ${e.escenario.toLowerCase()}. El ataque consiguió un nuevo primer down en ${e.general.conversion}% de ${e.general.jugadas.toLocaleString()} jugadas.`,
+    `Sin presión, el ataque lo consiguió ${sinP.conversion}% de las veces. Con presión, ${conP.conversion}%. Es una comparación; no prueba que la presión sea la única causa.`,
     mejor && peor && cCob
-      ? `Defensa: la cobertura que menos conversiones permitió fue ${mejor.grupo} (${mejor.conversion}%), y la que más, ${peor.grupo} (${peor.conversion}%). ${cCob.texto}`
-      : 'Defensa: no hay suficientes jugadas por cobertura para comparar en este escenario.',
+      ? `La defensa permitió menos primeros downs con ${mejor.grupo}: ${mejor.conversion}%. Con ${peor.grupo} permitió ${peor.conversion}%. ${cCob.texto}`
+      : 'No hay suficientes jugadas para comparar las coberturas.',
     conPA.jugadas >= 15
-      ? `Play action (fingir una carrera antes de lanzar): con play action convirtió ${conPA.conversion}% y sin él ${sinPA.conversion}%. ${cPA.texto}${i === 0 ? ' Ojo: el play action se usa sobre todo cuando faltan pocas yardas, y eso infla su resultado. Compara por distancia con los botones.' : ''}`
-      : `Play action: solo hubo ${conPA.jugadas} jugadas con play action en este escenario, muy pocas para comparar.`,
+      ? `Con una carrera fingida antes del pase, el ataque consiguió el primer down ${conPA.conversion}% de las veces. Sin fingir la carrera, ${sinPA.conversion}%. ${cPA.texto}${i === 0 ? ' Esta jugada se usa más cuando faltan pocas yardas. Usa los botones para hacer una comparación más justa.' : ''}`
+      : `Solo hubo ${conPA.jugadas} jugadas con una carrera fingida. Son muy pocas para comparar.`,
   ]
 
   return (
@@ -456,16 +458,16 @@ function TarjetaEfectividad() {
 
       <Tabla
         titulo="Ataque: presión y play action"
-        columnas={['Situación', 'Jugadas', 'El ataque convirtió', 'Margen de error']}
+        columnas={['Situación', 'Partidos', 'Jugadas', 'El ataque consiguió el primer down', 'Duda estimada']}
         filas={[...e.presion, ...e.playAction].map((f) => [
-          f.grupo, f.jugadas.toLocaleString(), pct(f.conversion),
-          f.conversion === null || f.jugadas < 15 ? 'muy pocas jugadas' : `± ${r1(margen(f.conversion, f.jugadas))} puntos`,
+          f.grupo, f.partidos, f.jugadas.toLocaleString(), pct(f.conversion),
+          f.margen === null ? 'faltan datos' : `± ${f.margen} puntos`,
         ])}
       />
       <Tabla
         titulo="Defensa: coberturas"
-        columnas={['Cobertura', 'Jugadas', 'Conversiones permitidas', 'Margen de error']}
-        filas={e.coberturas.map((f) => [f.grupo, f.jugadas.toLocaleString(), pct(f.conversion), f.conversion === null ? '—' : `± ${r1(margen(f.conversion, f.jugadas))} puntos`])}
+        columnas={['Cobertura', 'Partidos', 'Jugadas', 'Primeros downs permitidos', 'Duda estimada']}
+        filas={e.coberturas.map((f) => [f.grupo, f.partidos, f.jugadas.toLocaleString(), pct(f.conversion), f.margen === null ? '—' : `± ${f.margen} puntos`])}
       />
     </Tarjeta>
   )
@@ -474,7 +476,7 @@ function TarjetaEfectividad() {
 
 // ── Plan de juego para el coach ──────────────────────────────────────────────
 
-interface FilaPlan { grupo: string; jugadas: number; exito: number | null }
+interface FilaPlan { grupo: string; partidos: number; jugadas: number; exito: number | null; margen: number | null }
 interface Plan {
   jugadas: number; exito: number | null; presion: FilaPlan[]
   ataque: { formacion: FilaPlan[]; playAction: FilaPlan[]; salida: FilaPlan[] }
@@ -482,43 +484,46 @@ interface Plan {
 }
 type Nivel = 'clara' | 'pista' | 'azar' | 'pocas'
 
-// Compara la mejor opción contra el resto de opciones de la misma categoría.
-// mayorEsMejor=false para la defensa (menos éxito del ataque es mejor).
+// Compara las dos opciones con mejor resultado. La duda se calcula entre partidos.
 function mejorOpcion(filas: FilaPlan[], mayorEsMejor: boolean) {
-  const validas = filas.filter((f) => f.exito !== null)
-  if (validas.length < 2) return { nivel: 'pocas' as Nivel, mejor: validas[0], resto: null as number | null, m: null as number | null }
-  const mejor = validas[0]
-  const otros = validas.slice(1)
-  const n2 = otros.reduce((a, f) => a + f.jugadas, 0)
-  const resto = r1(otros.reduce((a, f) => a + (f.exito as number) * f.jugadas, 0) / n2)
-  const dif = Math.abs((mejor.exito as number) - resto)
-  const m = r1(Math.sqrt(margen(mejor.exito as number, mejor.jugadas) ** 2 + margen(resto, n2) ** 2))
+  const validas = filas
+    .filter((f) => f.exito !== null)
+    .sort((a, b) => mayorEsMejor ? (b.exito as number) - (a.exito as number) : (a.exito as number) - (b.exito as number))
+  if (validas.length < 2) {
+    return { nivel: 'pocas' as Nivel, mejor: validas[0], segunda: undefined as FilaPlan | undefined, m: null as number | null }
+  }
+  const [mejor, segunda] = validas
+  if (mejor.margen === null || segunda.margen === null) {
+    return { nivel: 'pocas' as Nivel, mejor, segunda, m: null as number | null }
+  }
+  const dif = Math.abs((mejor.exito as number) - (segunda.exito as number))
+  const m = r1(Math.sqrt(mejor.margen ** 2 + segunda.margen ** 2))
   const nivel: Nivel = dif > m * 1.5 ? 'clara' : dif > m ? 'pista' : 'azar'
-  void mayorEsMejor
-  return { nivel, mejor, resto, m }
+  return { nivel, mejor, segunda, m }
 }
 
 const ETIQUETA_NIVEL: Record<Nivel, { texto: string; clase: string }> = {
-  clara: { texto: '✔ Diferencia clara', clase: 'bg-[#013369] text-white' },
-  pista: { texto: '◐ Es una pista', clase: 'bg-orange-100 text-slate-900 border border-[#B84A00]' },
-  azar: { texto: '○ Ninguna destaca', clase: 'bg-slate-100 text-slate-900 border border-slate-400' },
-  pocas: { texto: '— Pocas jugadas', clase: 'bg-slate-100 text-slate-900 border border-slate-400' },
+  clara: { texto: '✔ Diferencia clara en esta muestra', clase: 'bg-[#013369] text-white' },
+  pista: { texto: '◐ Puede ser una pista', clase: 'bg-orange-100 text-slate-900 border border-[#B84A00]' },
+  azar: { texto: '○ No hay una diferencia clara', clase: 'bg-slate-100 text-slate-900 border border-slate-400' },
+  pocas: { texto: '— Faltan datos', clase: 'bg-slate-100 text-slate-900 border border-slate-400' },
 }
 
 function frase(cat: string, r: ReturnType<typeof mejorOpcion>, defensa: boolean) {
-  const que = defensa ? 'de éxito del ataque' : 'de éxito'
-  if (r.nivel === 'pocas' || !r.mejor) return `${cat}: no hay suficientes opciones con datos para comparar.`
-  const base = `${cat}: ${r.mejor.grupo} (${r.mejor.exito}% ${que}, contra ${r.resto}% del resto, en ${r.mejor.jugadas} jugadas).`
-  if (r.nivel === 'clara') return `${base} Es una diferencia clara.`
-  if (r.nivel === 'pista') return `${base} Es una pista: supera apenas el margen de error de ${r.m} puntos.`
-  return `${cat}: ninguna opción destaca. ${r.mejor.grupo} fue la mejor (${r.mejor.exito}%), pero la diferencia con el resto cabe en el margen de error.`
+  const resultado = defensa ? 'primeros downs permitidos' : 'jugadas exitosas'
+  if (r.nivel === 'pocas' || !r.mejor || !r.segunda) return `${cat}: faltan datos para comparar.`
+  const base = `${cat}: ${r.mejor.grupo} tuvo ${r.mejor.exito}% de ${resultado}. La siguiente opción fue ${r.segunda.grupo}, con ${r.segunda.exito}%.`
+  if (r.nivel === 'clara') return `${base} La diferencia es mayor que la duda estimada en esta muestra.`
+  if (r.nivel === 'pista') return `${base} La diferencia apenas supera la duda estimada. Puede ser una pista.`
+  return `${base} La diferencia puede ser azar. No hay una opción claramente mejor.`
 }
 
 function Selector<T extends string>({ etiqueta, opciones, valor, onCambio }: { etiqueta: string; opciones: [T, string][]; valor: T; onCambio: (v: T) => void }) {
+  const id = useId()
   return (
     <div>
-      <p className="text-sm font-bold text-slate-900 mb-1" id={`sel-${etiqueta}`}>{etiqueta}</p>
-      <div role="group" aria-labelledby={`sel-${etiqueta}`} className="flex flex-wrap gap-2">
+      <p className="text-sm font-bold text-slate-900 mb-1" id={id}>{etiqueta}</p>
+      <div role="group" aria-labelledby={id} className="flex flex-wrap gap-2">
         {opciones.map(([v, l]) => (
           <button
             key={v}
@@ -559,8 +564,8 @@ function PlanCoach() {
   if (plan && plan.jugadas > 0) {
     ataque = [
       { cat: 'Formación', r: mejorOpcion(plan.ataque.formacion, true) },
-      { cat: 'Play action', r: mejorOpcion(plan.ataque.playAction, true) },
-      { cat: 'Salida del quarterback', r: mejorOpcion(plan.ataque.salida, true) },
+      { cat: 'Carrera fingida antes del pase', r: mejorOpcion(plan.ataque.playAction, true) },
+      { cat: 'Dónde lanza el quarterback', r: mejorOpcion(plan.ataque.salida, true) },
     ]
     defensa = [
       { cat: 'Cobertura', r: mejorOpcion(plan.defensa.cobertura, false) },
@@ -568,10 +573,10 @@ function PlanCoach() {
     ]
     const [sp, cp] = plan.presion
     significado = [
-      `Escenario: ${escenario}. Hay ${plan.jugadas.toLocaleString()} jugadas de pase; el ataque tuvo éxito en ${plan.exito}%.`,
-      `Lo que más pesa es la presión: sin presión el ataque tuvo éxito ${sp.exito}% de las veces y con presión ${cp.exito}%. Para la defensa, presionar es la prioridad; para el ataque, protegerse.`,
-      `Si atacas. ${ataque.map((a) => frase(a.cat, a.r, false)).join(' ')}`,
-      `Si defiendes. ${defensa.map((a) => frase(a.cat, a.r, true)).join(' ')}`,
+      `Elegiste: ${escenario}. Encontramos ${plan.jugadas.toLocaleString()} jugadas de pase. El ataque tuvo éxito en ${plan.exito}%.`,
+      `En las jugadas sin presión, el ataque tuvo éxito ${sp.exito}% de las veces. En las jugadas con presión, ${cp.exito}%. Esto describe lo ocurrido; no prueba que la presión fuera la única causa.`,
+      `Para el ataque. ${ataque.map((a) => frase(a.cat, a.r, false)).join(' ')}`,
+      `Para la defensa. ${defensa.map((a) => frase(a.cat, a.r, true)).join(' ')}`,
     ]
     if (plan.jugadas < 150) significado.push('Este escenario tiene pocas jugadas: toma estos resultados con cautela.')
   }
@@ -614,25 +619,29 @@ function PlanCoach() {
             <Bloque titulo="🏈 Si atacas" items={ataque} def={false} />
             <Bloque titulo="🛡️ Si defiendes" items={defensa} def={true} />
           </div>
+          <div className="rounded-xl bg-blue-50 border border-blue-200 p-3 mt-4 text-sm text-slate-900">
+            <p><strong>Cómo leer el resultado:</strong> “Diferencia clara” significa que la separación fue mayor que la duda estimada entre partidos. “Puede ser una pista” pide más datos. “No hay una diferencia clara” significa que no conviene elegir una opción solo por este porcentaje.</p>
+            <p className="mt-2"><strong>Importante:</strong> esta herramienta compara lo que ocurrió en 2021. No garantiza qué pasará en el siguiente partido.</p>
+          </div>
           <p className="text-sm text-slate-800 mt-3">
-            <strong>Jugada exitosa:</strong> en 1er down ganar al menos 40% de las yardas que faltan; en 2do, 60%; en 3ro y 4to, todas.
-            Solo se comparan opciones con 30 jugadas o más (15 en play action y salida del quarterback).
+            <strong>Jugada exitosa:</strong> en 1er down, el ataque gana al menos 40% de las yardas que necesita; en 2do, 60%; en 3ro y 4to, consigue un nuevo primer down.
+            Solo mostramos opciones con suficientes jugadas para evitar resultados engañosos.
           </p>
           <details className="mt-3">
             <summary className="cursor-pointer font-semibold text-[#013369] focus:outline-none focus-visible:ring-4 focus-visible:ring-orange-400 rounded">Ver todas las opciones en tablas</summary>
             {[
-              ['Ataque: formación', plan.ataque.formacion, 'Éxito del ataque'],
-              ['Ataque: play action', plan.ataque.playAction, 'Éxito del ataque'],
-              ['Ataque: salida del quarterback', plan.ataque.salida, 'Éxito del ataque'],
-              ['Defensa: cobertura (menos es mejor)', plan.defensa.cobertura, 'Éxito permitido'],
-              ['Defensa: hombre a hombre o zona (menos es mejor)', plan.defensa.tipo, 'Éxito permitido'],
-              ['Presión', plan.presion, 'Éxito del ataque'],
+              ['Ataque: formación', plan.ataque.formacion, 'Jugadas exitosas'],
+              ['Ataque: carrera fingida', plan.ataque.playAction, 'Jugadas exitosas'],
+              ['Ataque: lugar del lanzamiento', plan.ataque.salida, 'Jugadas exitosas'],
+              ['Defensa: cobertura (menos es mejor)', plan.defensa.cobertura, 'Primeros downs permitidos'],
+              ['Defensa: hombre a hombre o zona (menos es mejor)', plan.defensa.tipo, 'Primeros downs permitidos'],
+              ['Presión', plan.presion, 'Jugadas exitosas del ataque'],
             ].map(([t, f, c]) => (
               <Tabla
                 key={t as string}
                 titulo={t as string}
-                columnas={['Opción', 'Jugadas', c as string, 'Margen de error']}
-                filas={(f as FilaPlan[]).map((x) => [x.grupo, x.jugadas.toLocaleString(), pct(x.exito), x.exito === null ? '—' : `± ${r1(margen(x.exito, x.jugadas))} puntos`])}
+                columnas={['Opción', 'Partidos', 'Jugadas', c as string, 'Duda estimada']}
+                filas={(f as FilaPlan[]).map((x) => [x.grupo, x.partidos, x.jugadas.toLocaleString(), pct(x.exito), x.margen === null ? '—' : `± ${x.margen} puntos`])}
               />
             ))}
           </details>

@@ -204,6 +204,7 @@ export default function Explorar() {
     <div className="flex flex-col gap-6">
       <ResumenClave datos={datos} />
       <PlanCoach />
+      <ReproductorJugada />
       <Cabina />
       <Asistente />
       <p className="text-base text-slate-800 bg-white border-l-4 border-[#B84A00] rounded-r-xl px-4 py-3">
@@ -681,6 +682,153 @@ function PlanCoach() {
             ))}
           </details>
         </>
+      )}
+    </Tarjeta>
+  )
+}
+
+// ── Reproducción de una jugada real ─────────────────────────────────────────
+
+interface PuntoReplay {
+  id: string
+  equipo: string
+  numero: number | null
+  nombre: string
+  rol: string
+  captura: boolean
+  x: number
+  y: number
+}
+interface FrameReplay { numero: number; evento: string; puntos: PuntoReplay[] }
+interface Replay {
+  titulo: string
+  subtitulo: string
+  descripcion: string
+  advertencia: string
+  ataque: string
+  defensa: string
+  frames: FrameReplay[]
+}
+
+const EVENTOS: Record<string, string> = {
+  ball_snap: 'Empieza la jugada',
+  play_action: 'Buffalo finge una carrera',
+  first_contact: 'Primer contacto con Josh Allen',
+  qb_sack: 'Josh Allen es derribado',
+}
+
+function ReproductorJugada() {
+  const permiteMovimiento = useAnimar()
+  const [datos, setDatos] = useState<Replay | null>(null)
+  const [indice, setIndice] = useState(0)
+  const [reproduciendo, setReproduciendo] = useState(false)
+
+  useEffect(() => {
+    fetch('api/replay').then((r) => (r.ok ? r.json() : Promise.reject())).then(setDatos).catch(() => setDatos(null))
+  }, [])
+
+  useEffect(() => {
+    if (!reproduciendo || !datos || !permiteMovimiento) return
+    const reloj = window.setInterval(() => {
+      setIndice((actual) => {
+        if (actual >= datos.frames.length - 1) {
+          setReproduciendo(false)
+          return actual
+        }
+        return actual + 1
+      })
+    }, 100)
+    return () => window.clearInterval(reloj)
+  }, [reproduciendo, datos, permiteMovimiento])
+
+  if (!datos) return null
+  const frame = datos.frames[indice]
+  const ultimoEvento = [...datos.frames.slice(0, indice + 1)].reverse().find((f) => f.evento)?.evento ?? 'ball_snap'
+  const explicacion = [
+    datos.descripcion,
+    'Los círculos son jugadores de Buffalo. Los cuadros son defensores de Miami. El óvalo es el balón.',
+    'Mira cómo los defensores marcados con borde dorado se acercan al quarterback.',
+    datos.advertencia,
+  ]
+
+  return (
+    <Tarjeta
+      titulo="Reproducción de una jugada real"
+      subtitulo={datos.subtitulo}
+      significado={explicacion}
+    >
+      <div className="mb-3 flex flex-wrap gap-3" aria-label="Leyenda de la cancha">
+        <span><span aria-hidden="true" className="text-[#013369]">●</span> Ataque: Buffalo</span>
+        <span><span aria-hidden="true" className="text-[#B84A00]">■</span> Defensa: Miami</span>
+        <span><span aria-hidden="true">🏈</span> Balón</span>
+        <span><span aria-hidden="true" className="text-amber-600">▣</span> Defensores que logran el sack</span>
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border-2 border-slate-400 bg-[#e8f1e8]">
+        <svg
+          viewBox="0 0 120 53.3"
+          className="min-w-[700px] w-full"
+          role="img"
+          aria-label={`Momento ${indice + 1} de ${datos.frames.length}. ${EVENTOS[ultimoEvento] ?? 'La jugada continúa'}.`}
+        >
+          <rect x="0" y="0" width="120" height="53.3" fill="#dcebdc" />
+          <rect x="0" y="0" width="10" height="53.3" fill="#cbd5e1" />
+          <rect x="110" y="0" width="10" height="53.3" fill="#cbd5e1" />
+          {Array.from({ length: 11 }, (_, i) => (i + 1) * 10).map((x) => (
+            <line key={x} x1={x} y1="0" x2={x} y2="53.3" stroke="#ffffff" strokeWidth="0.35" />
+          ))}
+          <line x1="0" y1="26.65" x2="120" y2="26.65" stroke="#ffffff" strokeWidth="0.2" strokeDasharray="1 1" />
+
+          {frame.puntos.map((p) => {
+            if (p.equipo === 'football') {
+              return <ellipse key={p.id} cx={p.x} cy={p.y} rx="0.9" ry="0.55" fill="#6B3410" stroke="#ffffff" strokeWidth="0.2" />
+            }
+            const ataque = p.equipo === datos.ataque
+            return (
+              <g key={p.id}>
+                {ataque
+                  ? <circle cx={p.x} cy={p.y} r="1.35" fill="#013369" stroke="#ffffff" strokeWidth="0.28" />
+                  : <rect x={p.x - 1.25} y={p.y - 1.25} width="2.5" height="2.5" rx="0.2" fill="#B84A00" stroke={p.captura ? '#F5C400' : '#ffffff'} strokeWidth={p.captura ? 0.65 : 0.28} />}
+                <text x={p.x} y={p.y + 0.48} textAnchor="middle" fontSize="1.35" fontWeight="700" fill="#ffffff">{p.numero}</text>
+                <title>{p.nombre}, {p.equipo}, número {p.numero}</title>
+              </g>
+            )
+          })}
+        </svg>
+      </div>
+
+      <p aria-live="polite" className="mt-3 text-lg font-bold text-slate-950">
+        {EVENTOS[ultimoEvento] ?? 'La jugada continúa'}
+      </p>
+      <label htmlFor="momento-jugada" className="mt-3 block text-sm font-bold text-slate-900">
+        Momento {indice + 1} de {datos.frames.length}
+      </label>
+      <input
+        id="momento-jugada"
+        type="range"
+        min="0"
+        max={datos.frames.length - 1}
+        value={indice}
+        onChange={(e) => { setReproduciendo(false); setIndice(Number(e.target.value)) }}
+        className="w-full accent-[#013369]"
+      />
+      <div className="mt-3 flex flex-wrap gap-3">
+        <button
+          onClick={() => setReproduciendo((v) => !v)}
+          disabled={!permiteMovimiento}
+          className="rounded-lg bg-[#013369] px-4 py-2 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-4 focus-visible:ring-orange-400"
+        >
+          {reproduciendo ? 'Pausar' : 'Reproducir'}
+        </button>
+        <button
+          onClick={() => { setReproduciendo(false); setIndice(0) }}
+          className="rounded-lg border-2 border-[#013369] px-4 py-2 font-bold text-[#013369] focus:outline-none focus-visible:ring-4 focus-visible:ring-orange-400"
+        >
+          Volver al inicio
+        </button>
+      </div>
+      {!permiteMovimiento && (
+        <p className="mt-3 text-sm text-slate-800">Tu dispositivo pide reducir el movimiento. Usa la barra para avanzar paso a paso.</p>
       )}
     </Tarjeta>
   )

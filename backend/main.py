@@ -364,6 +364,15 @@ def explorar():
     return _cache_explorar
 
 
+@app.get("/api/replay")
+def replay():
+    archivo = DATA / "replay.json"
+    if not archivo.exists():
+        raise HTTPException(status_code=404, detail="No hay una jugada para reproducir")
+    import json
+    return JSONResponse(content=json.loads(archivo.read_text(encoding="utf-8")))
+
+
 # ── Velocidad con los datos de seguimiento (data/tracking) ────────────────────
 
 _cache_velocidad: dict | None = None

@@ -68,6 +68,16 @@ def test_velocidad_documenta_muestra_e_incertidumbre():
     assert all(fila["margenRush"] is not None for fila in datos["porClima"])
 
 
+def test_reproduccion_es_una_jugada_real_y_completa():
+    respuesta = client.get("/api/replay")
+    assert respuesta.status_code == 200
+    jugada = respuesta.json()
+    assert jugada["ataque"] == "BUF"
+    assert jugada["defensa"] == "MIA"
+    assert len(jugada["frames"]) == 50
+    assert any(frame["evento"] == "qb_sack" for frame in jugada["frames"])
+
+
 def test_limite_de_preguntas_evitar_consumo_accidental():
     ip = "prueba-limite"
     main._peticiones_ia.pop(ip, None)

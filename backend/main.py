@@ -378,9 +378,10 @@ ORDEN_CLIMA_VEL = [
 
 
 def _calcular_velocidad() -> dict:
+    resumen_tracking = DATA / "tracking_summary.csv"
     archivos = sorted((DATA / "tracking").glob("tracking_*.csv"))
-    if not archivos:
-        raise FileNotFoundError("No hay archivos en data/tracking/")
+    if not resumen_tracking.exists() and not archivos:
+        raise FileNotFoundError("No hay datos resumidos ni archivos en data/tracking/")
 
     plays = pd.read_csv(DATA / "plays.csv", usecols=["gameId", "playId", "quarter"])
     pff = pd.read_csv(DATA / "pffScoutingData.csv")
@@ -390,23 +391,27 @@ def _calcular_velocidad() -> dict:
     games = games.merge(clima[["gameId", "roof", "temp"]], on="gameId", how="left")
     games = _poner_clima(games, [0, 55, 70, 80, 130], ORDEN_CLIMA_VEL[:4])
 
-    roles = pff[["gameId", "playId", "nflId", "pff_role"]]
-    partes = []
-    for f in archivos:
-        t = pd.read_csv(f, usecols=["gameId", "playId", "nflId", "frameId", "s", "event"]).dropna(subset=["nflId"])
-        snap = (t[t["event"] == "ball_snap"][["gameId", "playId", "frameId"]]
-                .drop_duplicates(["gameId", "playId"]).rename(columns={"frameId": "fsnap"}))
-        t = t.merge(snap, on=["gameId", "playId"])
-        t = t[t["frameId"] >= t["fsnap"]]
-        m = t.groupby(["gameId", "playId", "nflId"])["s"].max().reset_index(name="vmax")
-        partes.append(m.merge(roles, on=["gameId", "playId", "nflId"]))
-    m = pd.concat(partes)
+    if resumen_tracking.exists():
+        velocidades = pd.read_csv(resumen_tracking)
+    else:
+        roles = pff[["gameId", "playId", "nflId", "pff_role"]]
+        partes = []
+        for f in archivos:
+            t = pd.read_csv(f, usecols=["gameId", "playId", "nflId", "frameId", "s", "event"]).dropna(subset=["nflId"])
+            snap = (t[t["event"] == "ball_snap"][["gameId", "playId", "frameId"]]
+                    .drop_duplicates(["gameId", "playId"]).rename(columns={"frameId": "fsnap"}))
+            t = t.merge(snap, on=["gameId", "playId"])
+            t = t[t["frameId"] >= t["fsnap"]]
+            m = t.groupby(["gameId", "playId", "nflId"])["s"].max().reset_index(name="vmax")
+            partes.append(m.merge(roles, on=["gameId", "playId", "nflId"]))
+        m = pd.concat(partes)
+        qb = m[m.pff_role == "Pass"].groupby(["gameId", "playId"])["vmax"].max().rename("qb")
+        rush = m[m.pff_role == "Pass Rush"].groupby(["gameId", "playId"])["vmax"].mean().rename("rush")
+        velocidades = pd.concat([qb, rush], axis=1).dropna().reset_index()
 
-    qb = m[m.pff_role == "Pass"].groupby(["gameId", "playId"])["vmax"].max().reset_index(name="qb")
-    rush = m[m.pff_role == "Pass Rush"].groupby(["gameId", "playId"])["vmax"].mean().reset_index(name="rush")
     pres = pff.groupby(["gameId", "playId"]).agg(h=("pff_hit", "sum"), u=("pff_hurry", "sum"), k=("pff_sack", "sum")).reset_index()
     pres["presion"] = (pres.h + pres.u + pres.k) > 0
-    d = (plays.merge(qb, on=["gameId", "playId"]).merge(rush, on=["gameId", "playId"])
+    d = (plays.merge(velocidades, on=["gameId", "playId"])
          .merge(pres[["gameId", "playId", "presion"]], on=["gameId", "playId"], how="left")
          .merge(games[["gameId", "clima"]], on="gameId"))
     d = d[d["quarter"].between(1, 4)]
@@ -428,8 +433,8 @@ def _calcular_velocidad() -> dict:
         "partidos": int(d["gameId"].nunique()),
         "jugadas": int(len(d)),
         "muestra": (
-            "Se usaron 30 partidos elegidos para incluir frío, calor, clima templado e interiores. "
-            "No son todos los partidos de la temporada ni una muestra aleatoria."
+            "Se usaron los 122 partidos disponibles de las semanas 1 a 8. "
+            "Solo entraron jugadas con seguimiento completo del quarterback y los defensores."
         ),
         "porClima": [por_clima[c] for c in ORDEN_CLIMA_VEL if c in por_clima],
         "porCuarto": resumen(d, "quarter"),

@@ -102,6 +102,40 @@ function Cabina() {
   )
 }
 
+function ResumenClave({ datos }: { datos: Datos }) {
+  const down = Object.fromEntries(datos.porDown.map((d) => [d.down, d.presion]))
+  const cuarto = Object.fromEntries(datos.porCuarto.map((d) => [d.cuarto, d.presion]))
+  const calor = datos.clima3erCuarto.find((d) => d.clima.startsWith('Caluroso'))
+  const interior = datos.clima3erCuarto.find((d) => d.clima.startsWith('Interior'))
+  const puntos = [
+    `La presión apareció más veces en 3er down: ${down[3]}%. En 1er down fue ${down[1]}%.`,
+    `La presión fue parecida durante el partido: ${cuarto[1]}% en el 1er cuarto y ${cuarto[4]}% en el 4to. Esto no demuestra cansancio.`,
+    `No encontramos una diferencia clara por clima. En el 3er cuarto fue ${calor?.presion}% con calor y ${interior?.presion}% en interior.`,
+  ]
+  return (
+    <section aria-labelledby="resumen-titulo" className="rounded-2xl border-2 border-[#013369] bg-white p-6 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-bold uppercase tracking-wide text-[#B84A00]">Empieza aquí</p>
+          <h2 id="resumen-titulo" className="text-2xl font-bold text-slate-950">Tres resultados importantes</h2>
+        </div>
+        <div className="text-[#013369]">
+          <BotonEscuchar obtenerTexto={() => `Tres resultados importantes. ${puntos.join(' ')}`} etiqueta="Escuchar resumen" />
+        </div>
+      </div>
+      <ol className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+        {puntos.map((punto, i) => (
+          <li key={punto} className="rounded-xl bg-slate-50 p-4 text-base text-slate-950">
+            <span aria-hidden="true" className="mb-2 flex h-9 w-9 items-center justify-center rounded-full bg-[#013369] font-bold text-white">{i + 1}</span>
+            {punto}
+          </li>
+        ))}
+      </ol>
+      <p className="mt-4 text-sm text-slate-700">Estos datos muestran comparaciones. No prueban que una cosa cause otra.</p>
+    </section>
+  )
+}
+
 export default function Explorar() {
   const animar = useAnimar()
   const esc = useEscala()
@@ -168,6 +202,7 @@ export default function Explorar() {
 
   return (
     <div className="flex flex-col gap-6">
+      <ResumenClave datos={datos} />
       <PlanCoach />
       <Cabina />
       <Asistente />
@@ -543,7 +578,7 @@ function Selector<T extends string>({ etiqueta, opciones, valor, onCambio }: { e
 
 function PlanCoach() {
   const [down, setDown] = useState<'todos' | '1' | '2' | '3' | '4'>('3')
-  const [dist, setDist] = useState<'todas' | 'corta' | 'media' | 'larga'>('todas')
+  const [dist, setDist] = useState<'todas' | 'corta' | 'media' | 'larga'>('larga')
   const [cuarto, setCuarto] = useState<'todos' | '1' | '2' | '3' | '4'>('todos')
   const [plan, setPlan] = useState<Plan | null>(null)
   const [error, setError] = useState(false)

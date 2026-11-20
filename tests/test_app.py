@@ -62,9 +62,9 @@ def test_plan_usa_escenario_y_reporta_duda_por_partido():
 
 def test_velocidad_documenta_muestra_e_incertidumbre():
     datos = client.get("/api/velocidad").json()
-    assert datos["partidos"] == 30
-    assert datos["jugadas"] == 2083
-    assert "No son todos" in datos["muestra"]
+    assert datos["partidos"] == 122
+    assert datos["jugadas"] == 8434
+    assert "122 partidos" in datos["muestra"]
     assert all(fila["margenRush"] is not None for fila in datos["porClima"])
 
 
